@@ -31,6 +31,15 @@ available at:
 GET /api/prices/near-usd/latest
 ```
 
+Historical observations are available in chronological order at:
+
+```text
+GET /api/prices/near-usd/history?from=<ISO-8601>&to=<ISO-8601>&limit=1440
+```
+
+`from` and `to` are optional. `limit` defaults to 1,440 observations and has a
+maximum of 10,080 (seven days of one-minute prices).
+
 ## Railway
 
 When creating the Railway service, set its root directory to

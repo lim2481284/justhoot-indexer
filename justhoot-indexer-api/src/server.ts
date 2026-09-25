@@ -178,6 +178,79 @@ app.get("/api/prices/near-usd/latest", async (_request, reply) => {
   }
 });
 
+app.get<{
+  Querystring: { from?: string; to?: string; limit?: string };
+}>("/api/prices/near-usd/history", async (request, reply) => {
+  const parsedLimit = Number(request.query.limit ?? 1440);
+  const from = request.query.from;
+  const to = request.query.to;
+
+  if (!Number.isInteger(parsedLimit) || parsedLimit < 1 || parsedLimit > 10_080) {
+    return reply.status(400).send({
+      error: "invalid_limit",
+      message: "limit must be an integer between 1 and 10080",
+    });
+  }
+
+  if (from !== undefined && Number.isNaN(Date.parse(from))) {
+    return reply.status(400).send({
+      error: "invalid_from",
+      message: "from must be a valid ISO-8601 timestamp",
+    });
+  }
+
+  if (to !== undefined && Number.isNaN(Date.parse(to))) {
+    return reply.status(400).send({
+      error: "invalid_to",
+      message: "to must be a valid ISO-8601 timestamp",
+    });
+  }
+
+  if (from !== undefined && to !== undefined && Date.parse(from) > Date.parse(to)) {
+    return reply.status(400).send({
+      error: "invalid_range",
+      message: "from must be earlier than or equal to to",
+    });
+  }
+
+  try {
+    const result = await db.query<{
+      timestamp: Date;
+      near_usd_price: string;
+      source: string;
+      source_timestamp: Date;
+    }>(
+      `
+        SELECT timestamp, near_usd_price, source, source_timestamp
+        FROM (
+          SELECT timestamp, near_usd_price, source, source_timestamp
+          FROM near_usd_prices
+          WHERE ($1::timestamptz IS NULL OR timestamp >= $1::timestamptz)
+            AND ($2::timestamptz IS NULL OR timestamp <= $2::timestamptz)
+          ORDER BY timestamp DESC
+          LIMIT $3
+        ) AS recent_prices
+        ORDER BY timestamp ASC
+      `,
+      [from ?? null, to ?? null, parsedLimit],
+    );
+
+    return {
+      count: result.rowCount ?? result.rows.length,
+      from: from ?? null,
+      to: to ?? null,
+      prices: result.rows,
+    };
+  } catch (error) {
+    app.log.error(error, "Failed to fetch NEAR/USD price history");
+
+    return reply.status(503).send({
+      error: "database_unavailable",
+      message: "Unable to fetch NEAR/USD price history",
+    });
+  }
+});
+
 const stopNearUsdCollector = process.env.DATABASE_URL
   ? startNearUsdCollector(app.log)
   : () => undefined;
