@@ -1,7 +1,7 @@
 import Fastify from "fastify";
 import { db } from "./db.js";
 import { startHolderBalanceWorker } from "./holder-balance-worker.js";
-import { startNearUsdCollector } from "./near-usd-collector.js";
+import { startAssetUsdCollector } from "./near-usd-collector.js";
 
 const app = Fastify({
   logger: true,
@@ -34,6 +34,8 @@ app.get("/health/db", async (_request, reply) => {
           AND to_regclass('public.swaps') IS NOT NULL
           AND to_regclass('public.candles') IS NOT NULL
           AND to_regclass('public.near_usd_prices') IS NOT NULL
+          AND to_regclass('public.tracked_assets') IS NOT NULL
+          AND to_regclass('public.asset_usd_prices') IS NOT NULL
           AS schema_ready
     `);
 
@@ -169,11 +171,12 @@ app.get("/api/prices/near-usd/latest", async (_request, reply) => {
     }>(`
       SELECT
         timestamp,
-        near_usd_price,
+        price_usd AS near_usd_price,
         source,
         source_timestamp,
         NOW() - source_timestamp > INTERVAL '2 minutes' AS stale
-      FROM near_usd_prices
+      FROM asset_usd_prices
+      WHERE asset_id = 'near'
       ORDER BY timestamp DESC
       LIMIT 1
     `);
@@ -241,11 +244,12 @@ app.get<{
       source_timestamp: Date;
     }>(
       `
-        SELECT timestamp, near_usd_price, source, source_timestamp
+        SELECT timestamp, price_usd AS near_usd_price, source, source_timestamp
         FROM (
-          SELECT timestamp, near_usd_price, source, source_timestamp
-          FROM near_usd_prices
-          WHERE ($1::timestamptz IS NULL OR timestamp >= $1::timestamptz)
+          SELECT timestamp, price_usd, source, source_timestamp
+          FROM asset_usd_prices
+          WHERE asset_id = 'near'
+            AND ($1::timestamptz IS NULL OR timestamp >= $1::timestamptz)
             AND ($2::timestamptz IS NULL OR timestamp <= $2::timestamptz)
           ORDER BY timestamp DESC
           LIMIT $3
@@ -267,6 +271,143 @@ app.get<{
     return reply.status(503).send({
       error: "database_unavailable",
       message: "Unable to fetch NEAR/USD price history",
+    });
+  }
+});
+
+app.get("/api/prices/assets/latest", async (_request, reply) => {
+  try {
+    const result = await db.query<{
+      asset_id: string;
+      chain_id: string;
+      token_address: string;
+      timestamp: Date;
+      price_usd: string;
+      source: string;
+      source_pair_id: string | null;
+      liquidity_usd: string | null;
+      source_timestamp: Date;
+      stale: boolean;
+    }>(`
+      SELECT DISTINCT ON (prices.asset_id)
+        prices.asset_id,
+        assets.chain_id,
+        assets.token_address,
+        prices.timestamp,
+        prices.price_usd,
+        prices.source,
+        prices.source_pair_id,
+        prices.liquidity_usd,
+        prices.source_timestamp,
+        NOW() - prices.source_timestamp > INTERVAL '2 minutes' AS stale
+      FROM asset_usd_prices AS prices
+      INNER JOIN tracked_assets AS assets ON assets.asset_id = prices.asset_id
+      WHERE assets.enabled = true
+      ORDER BY prices.asset_id, prices.timestamp DESC
+    `);
+
+    return {
+      count: result.rowCount ?? result.rows.length,
+      prices: result.rows,
+    };
+  } catch (error) {
+    app.log.error(error, "Failed to fetch latest asset/USD prices");
+    return reply.status(503).send({
+      error: "database_unavailable",
+      message: "Unable to fetch latest asset/USD prices",
+    });
+  }
+});
+
+app.get<{
+  Params: { assetId: string };
+  Querystring: { from?: string; to?: string; limit?: string };
+}>("/api/prices/assets/:assetId/history", async (request, reply) => {
+  const assetId = request.params.assetId.toLowerCase();
+  const parsedLimit = Number(request.query.limit ?? 1440);
+  const from = request.query.from;
+  const to = request.query.to;
+
+  if (!/^[a-z0-9_-]{1,32}$/.test(assetId)) {
+    return reply.status(400).send({ error: "invalid_asset_id" });
+  }
+
+  if (!Number.isInteger(parsedLimit) || parsedLimit < 1 || parsedLimit > 10_080) {
+    return reply.status(400).send({
+      error: "invalid_limit",
+      message: "limit must be an integer between 1 and 10080",
+    });
+  }
+
+  if (from !== undefined && Number.isNaN(Date.parse(from))) {
+    return reply.status(400).send({
+      error: "invalid_from",
+      message: "from must be a valid ISO-8601 timestamp",
+    });
+  }
+
+  if (to !== undefined && Number.isNaN(Date.parse(to))) {
+    return reply.status(400).send({
+      error: "invalid_to",
+      message: "to must be a valid ISO-8601 timestamp",
+    });
+  }
+
+  if (from !== undefined && to !== undefined && Date.parse(from) > Date.parse(to)) {
+    return reply.status(400).send({
+      error: "invalid_range",
+      message: "from must be earlier than or equal to to",
+    });
+  }
+
+  try {
+    const asset = await db.query<{ chain_id: string; token_address: string }>(
+      `SELECT chain_id, token_address FROM tracked_assets WHERE asset_id = $1`,
+      [assetId],
+    );
+
+    if (!asset.rows[0]) {
+      return reply.status(404).send({ error: "asset_not_found" });
+    }
+
+    const result = await db.query<{
+      timestamp: Date;
+      price_usd: string;
+      source: string;
+      source_pair_id: string | null;
+      liquidity_usd: string | null;
+      source_timestamp: Date;
+    }>(
+      `
+        SELECT timestamp, price_usd, source, source_pair_id, liquidity_usd, source_timestamp
+        FROM (
+          SELECT timestamp, price_usd, source, source_pair_id, liquidity_usd, source_timestamp
+          FROM asset_usd_prices
+          WHERE asset_id = $1
+            AND ($2::timestamptz IS NULL OR timestamp >= $2::timestamptz)
+            AND ($3::timestamptz IS NULL OR timestamp <= $3::timestamptz)
+          ORDER BY timestamp DESC
+          LIMIT $4
+        ) AS recent_prices
+        ORDER BY timestamp ASC
+      `,
+      [assetId, from ?? null, to ?? null, parsedLimit],
+    );
+
+    return {
+      asset_id: assetId,
+      chain_id: asset.rows[0].chain_id,
+      token_address: asset.rows[0].token_address,
+      count: result.rowCount ?? result.rows.length,
+      from: from ?? null,
+      to: to ?? null,
+      prices: result.rows,
+    };
+  } catch (error) {
+    app.log.error(error, "Failed to fetch asset/USD price history");
+    return reply.status(503).send({
+      error: "database_unavailable",
+      message: "Unable to fetch asset/USD price history",
     });
   }
 });
@@ -353,7 +494,7 @@ app.get<{
 });
 
 const stopNearUsdCollector = process.env.DATABASE_URL
-  ? startNearUsdCollector(app.log)
+  ? startAssetUsdCollector(app.log)
   : () => undefined;
 const stopHolderBalanceWorker = process.env.DATABASE_URL
   ? startHolderBalanceWorker(app.log)

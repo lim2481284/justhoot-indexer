@@ -27,10 +27,10 @@ exactly as emitted on-chain; clients must use each token's NEP-141 decimals to
 calculate human-readable amounts and price. The response also identifies the
 launchpad token, counter token, and pool fee tier.
 
-The backend queries Dexscreener's public wNEAR pair endpoint once per minute,
-selects the NEAR pair with the highest reported USD liquidity, and stores its
-`priceUsd` as an approximate NEAR/USD reference price. The latest observation
-is available at:
+The backend queries Dexscreener once per minute for wNEAR, WETH, WBTC, and
+wrapped SOL. Requests are batched by chain, and the collector stores the most
+liquid valid USD-priced pair returned for each asset. The existing NEAR latest
+endpoint remains available at:
 
 ```text
 GET /api/prices/near-usd/latest
@@ -44,6 +44,17 @@ GET /api/prices/near-usd/history?from=<ISO-8601>&to=<ISO-8601>&limit=1440
 
 `from` and `to` are optional. `limit` defaults to 1,440 observations and has a
 maximum of 10,080 (seven days of one-minute prices).
+
+Latest prices for every tracked asset and per-asset history are available at:
+
+```text
+GET /api/prices/assets/latest
+GET /api/prices/assets/:assetId/history?from=<ISO-8601>&to=<ISO-8601>&limit=1440
+```
+
+The initial asset IDs are `near`, `eth`, `btc`, and `sol`. Historical prices
+are observations collected by this service; Dexscreener supplies current pair
+data rather than historical candles.
 
 Token holder balances will be available after the JustHoot NEP-141 event
 pipeline is connected:
