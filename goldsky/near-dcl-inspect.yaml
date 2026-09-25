@@ -1,0 +1,25 @@
+name: justhoot-near-dcl-inspect
+resource_size: s
+description: Inspect Ref DCL execution outcomes before enabling the production sink
+
+sources:
+  near_execution_outcomes:
+    type: dataset
+    dataset_name: near.execution_outcomes
+    version: 1.1.0
+    start_at: latest
+
+transforms:
+  dcl_execution_outcomes:
+    type: sql
+    primary_key: id
+    sql: |
+      SELECT *
+      FROM near_execution_outcomes
+      WHERE executor_id = 'dclv2.ref-labs.near'
+        AND status = 'SUCCESS'
+
+sinks:
+  inspect_only:
+    type: blackhole
+    from: dcl_execution_outcomes
