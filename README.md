@@ -21,7 +21,10 @@ GET /api/pools/:poolId/swaps?limit=50
 ```
 
 `limit` defaults to 50 and accepts values from 1 through 200. Token amounts and
-prices are returned as strings so clients do not lose decimal precision.
+prices are returned as strings so clients do not lose decimal precision. For
+the reference pool, `wnear_price_usdc` always means the number of USDC required
+for one wNEAR; `usdc_price_wnear` is the inverse. The legacy `price` field is
+retained and has the same value as `wnear_price_usdc`.
 
 The backend collects the public Binance `NEARUSDT` price once per minute and
 stores it as an approximate NEAR/USD reference price. The latest observation is

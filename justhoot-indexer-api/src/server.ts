@@ -77,6 +77,7 @@ type SwapRow = {
   amount_in: string;
   amount_out: string;
   price: string;
+  usdc_price_wnear: string;
   swapper: string | null;
   total_fee: string | null;
   protocol_fee: string | null;
@@ -121,6 +122,7 @@ app.get<{ Params: { poolId: string }; Querystring: { limit?: string } }>(
             amount_in,
             amount_out,
             price,
+            (1 / NULLIF(price::numeric, 0))::text AS usdc_price_wnear,
             swapper,
             total_fee,
             protocol_fee
@@ -135,7 +137,14 @@ app.get<{ Params: { poolId: string }; Querystring: { limit?: string } }>(
       return {
         pool_id: request.params.poolId,
         count: result.rowCount ?? result.rows.length,
-        swaps: result.rows,
+        swaps: result.rows.map((swap) => ({
+          ...swap,
+          side: swap.token_in === "wrap.near" ? "sell_wnear" : "buy_wnear",
+          base_token: "wrap.near",
+          quote_token: "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+          price_unit: "USDC_PER_WNEAR",
+          wnear_price_usdc: swap.price,
+        })),
       };
     } catch (error) {
       app.log.error(error, "Failed to fetch pool swaps");
