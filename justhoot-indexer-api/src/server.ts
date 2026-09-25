@@ -31,12 +31,12 @@ app.get("/health/db", async (_request, reply) => {
         current_database() AS database,
         NOW() AS checked_at,
         to_regclass('public.tokens') IS NOT NULL
-          AND to_regclass('public.pools') IS NOT NULL
           AND to_regclass('public.swaps') IS NOT NULL
           AND to_regclass('public.candles') IS NOT NULL
-          AND to_regclass('public.near_usd_prices') IS NOT NULL
           AND to_regclass('public.tracked_assets') IS NOT NULL
           AND to_regclass('public.asset_usd_prices') IS NOT NULL
+          AND to_regclass('public.token_balance_events') IS NOT NULL
+          AND to_regclass('public.token_balances') IS NOT NULL
           AS schema_ready
     `);
 

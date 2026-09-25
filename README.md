@@ -67,6 +67,16 @@ The initial asset IDs are `near`, `eth`, `btc`, and `sol`. Historical prices
 are observations collected by this service; Dexscreener supplies current pair
 data rather than historical candles.
 
+The active database schema contains eight application tables:
+
+```text
+schema_migrations, tokens, swaps, candles, token_balance_events,
+token_balances, tracked_assets, asset_usd_prices
+```
+
+The legacy `pools` and `near_usd_prices` tables were removed after dynamic pool
+filtering and generalized asset pricing replaced them.
+
 Token holder balances will be available after the JustHoot NEP-141 event
 pipeline is connected:
 
