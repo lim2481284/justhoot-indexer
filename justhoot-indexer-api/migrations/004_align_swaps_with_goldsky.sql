@@ -3,7 +3,9 @@ ALTER TABLE swaps
   DROP CONSTRAINT IF EXISTS swaps_amount_out_raw_check,
   DROP CONSTRAINT IF EXISTS swaps_amount_in_check,
   DROP CONSTRAINT IF EXISTS swaps_amount_out_check,
-  DROP CONSTRAINT IF EXISTS swaps_price_check;
+  DROP CONSTRAINT IF EXISTS swaps_price_check,
+  DROP CONSTRAINT IF EXISTS swaps_total_fee_check,
+  DROP CONSTRAINT IF EXISTS swaps_protocol_fee_check;
 
 ALTER TABLE swaps
   ALTER COLUMN event_index TYPE BIGINT,
