@@ -1,0 +1,23 @@
+name: justhoot-near-dcl-swaps-dev
+resource_size: s
+
+sources:
+  execution_outcomes:
+    type: dataset
+    dataset_name: near.execution_outcomes
+    version: 1.1.0
+    start_at: latest
+
+transforms:
+  dcl_successful_outcomes:
+    type: sql
+    primary_key: id
+    sql: |
+      SELECT *
+      FROM execution_outcomes
+      WHERE executor_id = 'dclv2.ref-labs.near'
+
+sinks:
+  inspect_sink:
+    type: blackhole
+    from: dcl_successful_outcomes
