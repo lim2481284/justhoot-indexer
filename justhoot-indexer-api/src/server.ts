@@ -23,6 +23,7 @@ app.get("/health/db", async (_request, reply) => {
       database: string;
       checked_at: Date;
       schema_ready: boolean;
+      reference_pool_ready: boolean;
     }>(`
       SELECT
         current_database() AS database,
@@ -32,7 +33,15 @@ app.get("/health/db", async (_request, reply) => {
           AND to_regclass('public.swaps') IS NOT NULL
           AND to_regclass('public.candles') IS NOT NULL
           AND to_regclass('public.near_usd_prices') IS NOT NULL
-          AS schema_ready
+          AS schema_ready,
+        CASE
+          WHEN to_regclass('public.pools') IS NULL THEN false
+          ELSE EXISTS (
+            SELECT 1
+            FROM pools
+            WHERE pool_id = '17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1|wrap.near|100'
+          )
+        END AS reference_pool_ready
     `);
 
     return {
@@ -41,6 +50,7 @@ app.get("/health/db", async (_request, reply) => {
       database_name: result.rows[0]?.database,
       checked_at: result.rows[0]?.checked_at,
       schema_ready: result.rows[0]?.schema_ready ?? false,
+      reference_pool_ready: result.rows[0]?.reference_pool_ready ?? false,
     };
   } catch (error) {
     app.log.error(error, "Database health check failed");
