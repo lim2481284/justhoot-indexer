@@ -130,6 +130,10 @@ transforms:
       }
 
 sinks:
-  inspect_sink:
-    type: blackhole
+  postgres_swaps:
+    type: postgres
     from: parsed_swaps
+    schema: public
+    table: swaps
+    secret_name: JUSTHOOT_RAILWAY_POSTGRES
+    primary_key: event_id

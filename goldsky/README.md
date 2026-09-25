@@ -1,9 +1,9 @@
 # Goldsky pipeline
 
-The development pipeline is intentionally inspection-only. It reads execution
-outcomes for `dclv2.ref-labs.near`, parses only successful `dcl.ref` swap
-events for the reference pool, and discards them after making them available
-through Goldsky live inspection. No database credentials are stored here.
+The development pipeline reads execution outcomes for `dclv2.ref-labs.near`,
+parses only successful `dcl.ref` swap events for the reference pool, and
+upserts them into Railway PostgreSQL using the deterministic `event_id`. No
+database credentials are stored here.
 
 ## Run the inspection pipeline
 
