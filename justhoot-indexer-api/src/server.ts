@@ -82,6 +82,16 @@ type SwapRow = {
   protocol_fee: string | null;
 };
 
+function formatTokenAmount(rawAmount: string, decimals: number): string {
+  const padded = rawAmount.padStart(decimals + 1, "0");
+  const whole = decimals === 0 ? padded : padded.slice(0, -decimals);
+  const fraction = decimals === 0
+    ? ""
+    : padded.slice(-decimals).replace(/0+$/, "");
+
+  return fraction ? `${whole}.${fraction}` : whole;
+}
+
 app.get<{ Params: { poolId: string }; Querystring: { limit?: string } }>(
   "/api/pools/:poolId/swaps",
   async (request, reply) => {
@@ -247,6 +257,87 @@ app.get<{
     return reply.status(503).send({
       error: "database_unavailable",
       message: "Unable to fetch NEAR/USD price history",
+    });
+  }
+});
+
+app.get<{
+  Params: { tokenId: string };
+  Querystring: { limit?: string; offset?: string };
+}>("/api/tokens/:tokenId/holders", async (request, reply) => {
+  const parsedLimit = Number(request.query.limit ?? 100);
+  const parsedOffset = Number(request.query.offset ?? 0);
+
+  if (!Number.isInteger(parsedLimit) || parsedLimit < 1 || parsedLimit > 200) {
+    return reply.status(400).send({
+      error: "invalid_limit",
+      message: "limit must be an integer between 1 and 200",
+    });
+  }
+
+  if (!Number.isInteger(parsedOffset) || parsedOffset < 0) {
+    return reply.status(400).send({
+      error: "invalid_offset",
+      message: "offset must be a non-negative integer",
+    });
+  }
+
+  try {
+    const [holdersResult, countResult] = await Promise.all([
+      db.query<{
+        account_id: string;
+        balance_raw: string;
+        updated_block_height: string;
+        updated_at: string;
+        decimals: number | null;
+      }>(
+        `
+          SELECT
+            balances.account_id,
+            balances.balance_raw,
+            balances.updated_block_height,
+            balances.updated_at,
+            tokens.decimals
+          FROM token_balances AS balances
+          LEFT JOIN tokens ON tokens.contract_id = balances.token_id
+          WHERE balances.token_id = $1
+            AND balances.is_excluded = false
+            AND balances.balance_raw::numeric > 0
+          ORDER BY balances.balance_raw::numeric DESC, balances.account_id ASC
+          LIMIT $2 OFFSET $3
+        `,
+        [request.params.tokenId, parsedLimit, parsedOffset],
+      ),
+      db.query<{ holders_count: string }>(
+        `
+          SELECT COUNT(*) AS holders_count
+          FROM token_balances
+          WHERE token_id = $1
+            AND is_excluded = false
+            AND balance_raw::numeric > 0
+        `,
+        [request.params.tokenId],
+      ),
+    ]);
+
+    return {
+      token_id: request.params.tokenId,
+      holders_count: Number(countResult.rows[0]?.holders_count ?? 0),
+      limit: parsedLimit,
+      offset: parsedOffset,
+      holders: holdersResult.rows.map(({ decimals, ...holder }) => ({
+        ...holder,
+        balance: decimals === null
+          ? null
+          : formatTokenAmount(holder.balance_raw, decimals),
+      })),
+    };
+  } catch (error) {
+    app.log.error(error, "Failed to fetch token holders");
+
+    return reply.status(503).send({
+      error: "database_unavailable",
+      message: "Unable to fetch token holders",
     });
   }
 });

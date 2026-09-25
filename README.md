@@ -40,6 +40,16 @@ GET /api/prices/near-usd/history?from=<ISO-8601>&to=<ISO-8601>&limit=1440
 `from` and `to` are optional. `limit` defaults to 1,440 observations and has a
 maximum of 10,080 (seven days of one-minute prices).
 
+Token holder balances will be available after the JustHoot NEP-141 event
+pipeline is connected:
+
+```text
+GET /api/tokens/:tokenId/holders?limit=100&offset=0
+```
+
+The holder index is kept separate from swaps because balances must be derived
+from every mint, transfer, and burn event—not only trades.
+
 ## Railway
 
 When creating the Railway service, set its root directory to
