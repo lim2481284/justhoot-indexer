@@ -53,6 +53,11 @@ GET /api/tokens/:tokenId/holders?limit=100&offset=0
 The holder index is kept separate from swaps because balances must be derived
 from every mint, transfer, and burn event—not only trades.
 
+The development Goldsky pipeline also watches `launchpad.justhoot.near` and
+`*.launchpad.justhoot.near` for successful NEP-141 `ft_mint`, `ft_transfer`, and
+`ft_burn` events. It writes immutable deltas to `token_balance_events`; a
+transactional backend worker applies each event once to `token_balances`.
+
 ## Railway
 
 When creating the Railway service, set its root directory to

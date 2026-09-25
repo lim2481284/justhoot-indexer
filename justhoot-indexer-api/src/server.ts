@@ -1,5 +1,6 @@
 import Fastify from "fastify";
 import { db } from "./db.js";
+import { startHolderBalanceWorker } from "./holder-balance-worker.js";
 import { startNearUsdCollector } from "./near-usd-collector.js";
 
 const app = Fastify({
@@ -354,9 +355,13 @@ app.get<{
 const stopNearUsdCollector = process.env.DATABASE_URL
   ? startNearUsdCollector(app.log)
   : () => undefined;
+const stopHolderBalanceWorker = process.env.DATABASE_URL
+  ? startHolderBalanceWorker(app.log)
+  : () => undefined;
 
 app.addHook("onClose", async () => {
   stopNearUsdCollector();
+  stopHolderBalanceWorker();
   await db.end();
 });
 

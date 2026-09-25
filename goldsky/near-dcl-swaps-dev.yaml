@@ -1,6 +1,6 @@
 name: justhoot-near-dcl-swaps-dev
 resource_size: s
-description: Parse successful Ref DCL USDC/wNEAR swaps for live inspection
+description: Index Ref DCL swaps and JustHoot NEP-141 balance events
 
 sources:
   execution_outcomes:
@@ -129,11 +129,146 @@ transforms:
         return output;
       }
 
+  justhoot_token_outcomes:
+    type: sql
+    primary_key: id
+    sql: |
+      SELECT
+        id,
+        executor_id,
+        logs,
+        status,
+        transaction_hash,
+        trigger_block_height,
+        trigger_block_timestamp
+      FROM execution_outcomes
+      WHERE executor_id = 'launchpad.justhoot.near'
+         OR executor_id LIKE '%.launchpad.justhoot.near'
+
+  parsed_balance_events:
+    type: script
+    from: justhoot_token_outcomes
+    language: typescript
+    primary_key: event_id
+    schema:
+      event_id: string
+      transaction_hash: string
+      event_index: int64
+      token_id: string
+      account_id: string
+      delta_raw: string
+      event_type: string
+      block_height: int64
+      timestamp: string
+    script: |
+      function invoke(data) {
+        let status;
+        try {
+          status = typeof data.status === "string" ? JSON.parse(data.status) : data.status;
+        } catch (_) {
+          return [];
+        }
+
+        if (!status || (!("SuccessValue" in status) && !("SuccessReceiptId" in status))) {
+          return [];
+        }
+
+        function validAmount(value) {
+          return typeof value === "string" && /^[0-9]+$/.test(value) && value !== "0";
+        }
+
+        const output = [];
+        const logs = Array.isArray(data.logs) ? data.logs : [];
+
+        for (let logIndex = 0; logIndex < logs.length; logIndex++) {
+          const log = logs[logIndex];
+          if (typeof log !== "string" || !log.startsWith("EVENT_JSON:")) continue;
+
+          let event;
+          try {
+            event = JSON.parse(log.slice("EVENT_JSON:".length));
+          } catch (_) {
+            continue;
+          }
+
+          if (event.standard !== "nep141" || !Array.isArray(event.data)) continue;
+          if (!["ft_mint", "ft_transfer", "ft_burn"].includes(event.event)) continue;
+
+          for (let dataIndex = 0; dataIndex < event.data.length; dataIndex++) {
+            const item = event.data[dataIndex];
+            if (!validAmount(item.amount)) continue;
+
+            const base = {
+              transaction_hash: data.transaction_hash,
+              token_id: data.executor_id,
+              block_height: data.trigger_block_height,
+              timestamp: new Date(data.trigger_block_timestamp).toISOString()
+            };
+            const baseIndex = logIndex * 1000000 + dataIndex * 10;
+
+            if (event.event === "ft_mint" && typeof item.owner_id === "string") {
+              output.push({
+                ...base,
+                event_id: data.id + ":" + logIndex + ":" + dataIndex + ":mint",
+                event_index: baseIndex,
+                account_id: item.owner_id,
+                delta_raw: item.amount,
+                event_type: "mint"
+              });
+            }
+
+            if (event.event === "ft_burn" && typeof item.owner_id === "string") {
+              output.push({
+                ...base,
+                event_id: data.id + ":" + logIndex + ":" + dataIndex + ":burn",
+                event_index: baseIndex,
+                account_id: item.owner_id,
+                delta_raw: "-" + item.amount,
+                event_type: "burn"
+              });
+            }
+
+            if (
+              event.event === "ft_transfer" &&
+              typeof item.old_owner_id === "string" &&
+              typeof item.new_owner_id === "string"
+            ) {
+              output.push({
+                ...base,
+                event_id: data.id + ":" + logIndex + ":" + dataIndex + ":debit",
+                event_index: baseIndex,
+                account_id: item.old_owner_id,
+                delta_raw: "-" + item.amount,
+                event_type: "transfer"
+              });
+              output.push({
+                ...base,
+                event_id: data.id + ":" + logIndex + ":" + dataIndex + ":credit",
+                event_index: baseIndex + 1,
+                account_id: item.new_owner_id,
+                delta_raw: item.amount,
+                event_type: "transfer"
+              });
+            }
+          }
+        }
+
+        return output;
+      }
+
 sinks:
   postgres_swaps:
     type: postgres
     from: parsed_swaps
     schema: public
     table: swaps
+    secret_name: JUSTHOOT_RAILWAY_POSTGRES
+    primary_key: event_id
+
+  postgres_balance_events:
+    type: postgres
+    from: parsed_balance_events
+    schema: public
+    table: token_balance_events
     secret_name: JUSTHOOT_RAILWAY_POSTGRES
     primary_key: event_id
