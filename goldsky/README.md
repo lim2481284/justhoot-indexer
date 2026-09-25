@@ -1,17 +1,17 @@
 # Goldsky pipeline
 
-The first pipeline is intentionally inspection-only. It reads new successful
-execution outcomes for `dclv2.ref-labs.near` and discards them after making
-them available through Goldsky live inspection. No database credentials are
-stored in this repository.
+The development pipeline is intentionally inspection-only. It reads execution
+outcomes for `dclv2.ref-labs.near`, parses only successful `dcl.ref` swap
+events for the reference pool, and discards them after making them available
+through Goldsky live inspection. No database credentials are stored here.
 
 ## Run the inspection pipeline
 
 ```powershell
 goldsky login
-goldsky turbo validate goldsky/near-dcl-inspect.yaml
-goldsky turbo apply goldsky/near-dcl-inspect.yaml
-goldsky turbo inspect justhoot-near-dcl-inspect
+goldsky turbo validate goldsky/near-dcl-swaps-dev.yaml
+goldsky turbo apply goldsky/near-dcl-swaps-dev.yaml
+goldsky turbo inspect justhoot-near-dcl-swaps-dev -n parsed_swaps --print
 ```
 
 Use the inspected records to confirm the exact `near.execution_outcomes`

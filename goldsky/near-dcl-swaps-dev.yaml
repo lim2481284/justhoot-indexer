@@ -1,5 +1,6 @@
 name: justhoot-near-dcl-swaps-dev
 resource_size: s
+description: Parse successful Ref DCL USDC/wNEAR swaps for live inspection
 
 sources:
   execution_outcomes:
@@ -9,15 +10,126 @@ sources:
     start_at: latest
 
 transforms:
-  dcl_successful_outcomes:
+  dcl_outcomes:
     type: sql
     primary_key: id
     sql: |
-      SELECT *
+      SELECT
+        id,
+        logs,
+        status,
+        transaction_hash,
+        trigger_block_height,
+        trigger_block_timestamp
       FROM execution_outcomes
       WHERE executor_id = 'dclv2.ref-labs.near'
+
+  parsed_swaps:
+    type: script
+    from: dcl_outcomes
+    language: typescript
+    primary_key: event_id
+    schema:
+      event_id: string
+      transaction_hash: string
+      event_index: int64
+      block_height: int64
+      timestamp: string
+      pool_id: string
+      token_in: string
+      token_out: string
+      amount_in_raw: string
+      amount_out_raw: string
+      amount_in: string
+      amount_out: string
+      price: string
+      swapper: string
+      total_fee: string
+      protocol_fee: string
+    script: |
+      function invoke(data) {
+        const poolId = "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1|wrap.near|100";
+        const usdc = "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1";
+        const wnear = "wrap.near";
+
+        function formatUnits(raw, decimals) {
+          const negative = raw.startsWith("-");
+          const digits = negative ? raw.slice(1) : raw;
+          const padded = digits.padStart(decimals + 1, "0");
+          const whole = padded.slice(0, -decimals) || "0";
+          const fraction = padded.slice(-decimals).replace(/0+$/, "");
+          return (negative ? "-" : "") + whole + (fraction ? "." + fraction : "");
+        }
+
+        let status;
+        try {
+          status = JSON.parse(data.status);
+        } catch (_) {
+          return [];
+        }
+
+        if (!("SuccessValue" in status) && !("SuccessReceiptId" in status)) {
+          return [];
+        }
+
+        const output = [];
+        const logs = Array.isArray(data.logs) ? data.logs : [];
+
+        for (let logIndex = 0; logIndex < logs.length; logIndex++) {
+          const log = logs[logIndex];
+          if (typeof log !== "string" || !log.startsWith("EVENT_JSON:")) continue;
+
+          let event;
+          try {
+            event = JSON.parse(log.slice("EVENT_JSON:".length));
+          } catch (_) {
+            continue;
+          }
+
+          if (event.standard !== "dcl.ref" || event.event !== "swap" || !Array.isArray(event.data)) continue;
+
+          for (let dataIndex = 0; dataIndex < event.data.length; dataIndex++) {
+            const swap = event.data[dataIndex];
+            if (swap.pool_id !== poolId) continue;
+            if (!swap.amount_in || !swap.amount_out) continue;
+
+            const inDecimals = swap.token_in === usdc ? 6 : swap.token_in === wnear ? 24 : null;
+            const outDecimals = swap.token_out === usdc ? 6 : swap.token_out === wnear ? 24 : null;
+            if (inDecimals === null || outDecimals === null) continue;
+
+            const amountIn = formatUnits(swap.amount_in, inDecimals);
+            const amountOut = formatUnits(swap.amount_out, outDecimals);
+            const usdcAmount = swap.token_in === usdc ? amountIn : amountOut;
+            const wnearAmount = swap.token_in === wnear ? amountIn : amountOut;
+            const price = Number(usdcAmount) / Number(wnearAmount);
+            if (!Number.isFinite(price) || price <= 0) continue;
+
+            const eventIndex = logIndex * 1000 + dataIndex;
+            output.push({
+              event_id: data.id + ":" + logIndex + ":" + dataIndex,
+              transaction_hash: data.transaction_hash,
+              event_index: eventIndex,
+              block_height: data.trigger_block_height,
+              timestamp: new Date(data.trigger_block_timestamp).toISOString(),
+              pool_id: swap.pool_id,
+              token_in: swap.token_in,
+              token_out: swap.token_out,
+              amount_in_raw: swap.amount_in,
+              amount_out_raw: swap.amount_out,
+              amount_in: amountIn,
+              amount_out: amountOut,
+              price: price.toFixed(18),
+              swapper: swap.swapper || "",
+              total_fee: swap.total_fee || "0",
+              protocol_fee: swap.protocol_fee || "0"
+            });
+          }
+        }
+
+        return output;
+      }
 
 sinks:
   inspect_sink:
     type: blackhole
-    from: dcl_successful_outcomes
+    from: parsed_swaps
