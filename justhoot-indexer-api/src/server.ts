@@ -1,5 +1,6 @@
 import Fastify from "fastify";
 import { db } from "./db.js";
+import { startNearUsdCollector } from "./near-usd-collector.js";
 
 const app = Fastify({
   logger: true,
@@ -137,7 +138,52 @@ app.get<{ Params: { poolId: string }; Querystring: { limit?: string } }>(
   },
 );
 
+app.get("/api/prices/near-usd/latest", async (_request, reply) => {
+  try {
+    const result = await db.query<{
+      timestamp: Date;
+      near_usd_price: string;
+      source: string;
+      source_timestamp: Date;
+      stale: boolean;
+    }>(`
+      SELECT
+        timestamp,
+        near_usd_price,
+        source,
+        source_timestamp,
+        NOW() - source_timestamp > INTERVAL '2 minutes' AS stale
+      FROM near_usd_prices
+      ORDER BY timestamp DESC
+      LIMIT 1
+    `);
+
+    const price = result.rows[0];
+
+    if (!price) {
+      return reply.status(404).send({
+        error: "price_unavailable",
+        message: "No NEAR/USD price has been collected yet",
+      });
+    }
+
+    return price;
+  } catch (error) {
+    app.log.error(error, "Failed to fetch the latest NEAR/USD price");
+
+    return reply.status(503).send({
+      error: "database_unavailable",
+      message: "Unable to fetch the latest NEAR/USD price",
+    });
+  }
+});
+
+const stopNearUsdCollector = process.env.DATABASE_URL
+  ? startNearUsdCollector(app.log)
+  : () => undefined;
+
 app.addHook("onClose", async () => {
+  stopNearUsdCollector();
   await db.end();
 });
 
