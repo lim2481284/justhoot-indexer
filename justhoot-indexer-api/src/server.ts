@@ -85,7 +85,11 @@ function describePool(poolId: string) {
     token_y: tokenY ?? null,
     fee_tier: feeTier ?? null,
     launchpad_token: launchpadToken,
-    counter_token: launchpadToken === tokenX ? tokenY ?? null : tokenX ?? null,
+    counter_token: launchpadToken === null
+      ? null
+      : launchpadToken === tokenX
+        ? tokenY ?? null
+        : tokenX ?? null,
   };
 }
 
