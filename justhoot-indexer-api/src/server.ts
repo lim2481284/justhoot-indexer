@@ -62,6 +62,81 @@ app.get("/health/db", async (_request, reply) => {
   }
 });
 
+type SwapRow = {
+  event_id: string;
+  transaction_hash: string;
+  event_index: string;
+  block_height: string;
+  timestamp: string;
+  pool_id: string;
+  token_in: string;
+  token_out: string;
+  amount_in_raw: string;
+  amount_out_raw: string;
+  amount_in: string;
+  amount_out: string;
+  price: string;
+  swapper: string | null;
+  total_fee: string | null;
+  protocol_fee: string | null;
+};
+
+app.get<{ Params: { poolId: string }; Querystring: { limit?: string } }>(
+  "/api/pools/:poolId/swaps",
+  async (request, reply) => {
+    const parsedLimit = Number(request.query.limit ?? 50);
+
+    if (!Number.isInteger(parsedLimit) || parsedLimit < 1 || parsedLimit > 200) {
+      return reply.status(400).send({
+        error: "invalid_limit",
+        message: "limit must be an integer between 1 and 200",
+      });
+    }
+
+    try {
+      const result = await db.query<SwapRow>(
+        `
+          SELECT
+            event_id,
+            transaction_hash,
+            event_index,
+            block_height,
+            timestamp,
+            pool_id,
+            token_in,
+            token_out,
+            amount_in_raw,
+            amount_out_raw,
+            amount_in,
+            amount_out,
+            price,
+            swapper,
+            total_fee,
+            protocol_fee
+          FROM swaps
+          WHERE pool_id = $1
+          ORDER BY timestamp DESC, event_id DESC
+          LIMIT $2
+        `,
+        [request.params.poolId, parsedLimit],
+      );
+
+      return {
+        pool_id: request.params.poolId,
+        count: result.rowCount ?? result.rows.length,
+        swaps: result.rows,
+      };
+    } catch (error) {
+      app.log.error(error, "Failed to fetch pool swaps");
+
+      return reply.status(503).send({
+        error: "database_unavailable",
+        message: "Unable to fetch swaps",
+      });
+    }
+  },
+);
+
 app.addHook("onClose", async () => {
   await db.end();
 });

@@ -14,6 +14,15 @@ npm run dev
 
 The local health check is available at `http://localhost:3000/health`.
 
+Recent indexed swaps are available at:
+
+```text
+GET /api/pools/:poolId/swaps?limit=50
+```
+
+`limit` defaults to 50 and accepts values from 1 through 200. Token amounts and
+prices are returned as strings so clients do not lose decimal precision.
+
 ## Railway
 
 When creating the Railway service, set its root directory to
