@@ -1,5 +1,6 @@
 import Fastify from "fastify";
 import { db } from "./db.js";
+import { startCandleWorker } from "./candle-worker.js";
 import { startHolderBalanceWorker } from "./holder-balance-worker.js";
 import { startAssetUsdCollector } from "./near-usd-collector.js";
 
@@ -159,6 +160,60 @@ app.get<{ Params: { poolId: string }; Querystring: { limit?: string } }>(
     }
   },
 );
+
+app.get<{
+  Params: { poolId: string };
+  Querystring: { interval?: string; from?: string; to?: string; limit?: string };
+}>("/api/pools/:poolId/candles", async (request, reply) => {
+  const interval = request.query.interval ?? "1m";
+  const parsedLimit = Number(request.query.limit ?? 500);
+  const from = request.query.from;
+  const to = request.query.to;
+  const allowedIntervals = ["1m", "5m", "15m", "1h", "4h", "1d"];
+
+  if (!allowedIntervals.includes(interval)) {
+    return reply.status(400).send({ error: "invalid_interval" });
+  }
+  if (!Number.isInteger(parsedLimit) || parsedLimit < 1 || parsedLimit > 5000) {
+    return reply.status(400).send({ error: "invalid_limit" });
+  }
+  if (from !== undefined && Number.isNaN(Date.parse(from))) {
+    return reply.status(400).send({ error: "invalid_from" });
+  }
+  if (to !== undefined && Number.isNaN(Date.parse(to))) {
+    return reply.status(400).send({ error: "invalid_to" });
+  }
+
+  try {
+    const result = await db.query(
+      `SELECT pool_id, interval, timestamp, base_token, quote_token,
+              open, high, low, close, volume, trade_count,
+              open_usd, high_usd, low_usd, close_usd
+       FROM (
+         SELECT pool_id, interval, timestamp, base_token, quote_token,
+                open, high, low, close, volume, trade_count,
+                open_usd, high_usd, low_usd, close_usd
+         FROM candles
+         WHERE pool_id = $1 AND interval = $2
+           AND ($3::timestamptz IS NULL OR timestamp >= $3::timestamptz)
+           AND ($4::timestamptz IS NULL OR timestamp <= $4::timestamptz)
+         ORDER BY timestamp DESC
+         LIMIT $5
+       ) recent
+       ORDER BY timestamp ASC`,
+      [request.params.poolId, interval, from ?? null, to ?? null, parsedLimit],
+    );
+    return {
+      pool_id: request.params.poolId,
+      interval,
+      count: result.rowCount ?? result.rows.length,
+      candles: result.rows,
+    };
+  } catch (error) {
+    app.log.error(error, "Failed to fetch candles");
+    return reply.status(503).send({ error: "database_unavailable" });
+  }
+});
 
 app.get("/api/prices/near-usd/latest", async (_request, reply) => {
   try {
@@ -499,10 +554,14 @@ const stopNearUsdCollector = process.env.DATABASE_URL
 const stopHolderBalanceWorker = process.env.DATABASE_URL
   ? startHolderBalanceWorker(app.log)
   : () => undefined;
+const stopCandleWorker = process.env.DATABASE_URL
+  ? startCandleWorker(app.log)
+  : () => undefined;
 
 app.addHook("onClose", async () => {
   stopNearUsdCollector();
   stopHolderBalanceWorker();
+  stopCandleWorker();
   await db.end();
 });
 

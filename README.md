@@ -27,6 +27,17 @@ exactly as emitted on-chain; clients must use each token's NEP-141 decimals to
 calculate human-readable amounts and price. The response also identifies the
 launchpad token, counter token, and pool fee tier.
 
+OHLCV candles are generated for quote-token prices and, when conversion data is
+available, USD prices:
+
+```text
+GET /api/pools/:poolId/candles?interval=1m&limit=500
+```
+
+Supported intervals are `1m`, `5m`, `15m`, `1h`, `4h`, and `1d`. Quote OHLC
+fields are always populated after token metadata is available. USD OHLC fields
+are populated for wNEAR and verified USDT/USDC quote tokens.
+
 The backend queries Dexscreener once per minute for wNEAR, WETH, WBTC, and
 wrapped SOL. Requests are batched by chain, and the collector stores the most
 liquid valid USD-priced pair returned for each asset. The existing NEAR latest
