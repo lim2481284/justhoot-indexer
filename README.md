@@ -20,11 +20,12 @@ Recent indexed swaps are available at:
 GET /api/pools/:poolId/swaps?limit=50
 ```
 
-`limit` defaults to 50 and accepts values from 1 through 200. Token amounts and
-prices are returned as strings so clients do not lose decimal precision. For
-the reference pool, `wnear_price_usdc` always means the number of USDC required
-for one wNEAR; `usdc_price_wnear` is the inverse. The legacy `price` field is
-retained and has the same value as `wnear_price_usdc`.
+`limit` defaults to 50 and accepts values from 1 through 200. Goldsky accepts a
+successful Ref DCL swap when either token in its pool ID ends with
+`.launchpad.hoot.near`. The API returns `amount_in_raw` and `amount_out_raw`
+exactly as emitted on-chain; clients must use each token's NEP-141 decimals to
+calculate human-readable amounts and price. The response also identifies the
+launchpad token, counter token, and pool fee tier.
 
 The backend collects the public Binance `NEARUSDT` price once per minute and
 stores it as an approximate NEAR/USD reference price. The latest observation is
@@ -53,8 +54,8 @@ GET /api/tokens/:tokenId/holders?limit=100&offset=0
 The holder index is kept separate from swaps because balances must be derived
 from every mint, transfer, and burn event—not only trades.
 
-The development Goldsky pipeline also watches `launchpad.justhoot.near` and
-`*.launchpad.justhoot.near` for successful NEP-141 `ft_mint`, `ft_transfer`, and
+The development Goldsky pipeline also watches `*.launchpad.hoot.near` for
+successful NEP-141 `ft_mint`, `ft_transfer`, and
 `ft_burn` events. It writes immutable deltas to `token_balance_events`; a
 transactional backend worker applies each event once to `token_balances`.
 

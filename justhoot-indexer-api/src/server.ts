@@ -25,7 +25,6 @@ app.get("/health/db", async (_request, reply) => {
       database: string;
       checked_at: Date;
       schema_ready: boolean;
-      reference_pool_ready: boolean;
     }>(`
       SELECT
         current_database() AS database,
@@ -35,15 +34,7 @@ app.get("/health/db", async (_request, reply) => {
           AND to_regclass('public.swaps') IS NOT NULL
           AND to_regclass('public.candles') IS NOT NULL
           AND to_regclass('public.near_usd_prices') IS NOT NULL
-          AS schema_ready,
-        CASE
-          WHEN to_regclass('public.pools') IS NULL THEN false
-          ELSE EXISTS (
-            SELECT 1
-            FROM pools
-            WHERE pool_id = '17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1|wrap.near|100'
-          )
-        END AS reference_pool_ready
+          AS schema_ready
     `);
 
     return {
@@ -52,7 +43,6 @@ app.get("/health/db", async (_request, reply) => {
       database_name: result.rows[0]?.database,
       checked_at: result.rows[0]?.checked_at,
       schema_ready: result.rows[0]?.schema_ready ?? false,
-      reference_pool_ready: result.rows[0]?.reference_pool_ready ?? false,
     };
   } catch (error) {
     app.log.error(error, "Database health check failed");
@@ -75,14 +65,29 @@ type SwapRow = {
   token_out: string;
   amount_in_raw: string;
   amount_out_raw: string;
-  amount_in: string;
-  amount_out: string;
-  price: string;
-  usdc_price_wnear: string;
   swapper: string | null;
   total_fee: string | null;
   protocol_fee: string | null;
 };
+
+const launchpadTokenSuffix = ".launchpad.hoot.near";
+
+function describePool(poolId: string) {
+  const [tokenX, tokenY, feeTier] = poolId.split("|");
+  const launchpadToken = tokenX?.endsWith(launchpadTokenSuffix)
+    ? tokenX
+    : tokenY?.endsWith(launchpadTokenSuffix)
+      ? tokenY
+      : null;
+
+  return {
+    token_x: tokenX ?? null,
+    token_y: tokenY ?? null,
+    fee_tier: feeTier ?? null,
+    launchpad_token: launchpadToken,
+    counter_token: launchpadToken === tokenX ? tokenY ?? null : tokenX ?? null,
+  };
+}
 
 function formatTokenAmount(rawAmount: string, decimals: number): string {
   const padded = rawAmount.padStart(decimals + 1, "0");
@@ -120,10 +125,6 @@ app.get<{ Params: { poolId: string }; Querystring: { limit?: string } }>(
             token_out,
             amount_in_raw,
             amount_out_raw,
-            amount_in,
-            amount_out,
-            price,
-            (1 / NULLIF(price::numeric, 0))::text AS usdc_price_wnear,
             swapper,
             total_fee,
             protocol_fee
@@ -137,15 +138,10 @@ app.get<{ Params: { poolId: string }; Querystring: { limit?: string } }>(
 
       return {
         pool_id: request.params.poolId,
+        ...describePool(request.params.poolId),
+        amounts_are_raw: true,
         count: result.rowCount ?? result.rows.length,
-        swaps: result.rows.map((swap) => ({
-          ...swap,
-          side: swap.token_in === "wrap.near" ? "sell_wnear" : "buy_wnear",
-          base_token: "wrap.near",
-          quote_token: "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
-          price_unit: "USDC_PER_WNEAR",
-          wnear_price_usdc: swap.price,
-        })),
+        swaps: result.rows,
       };
     } catch (error) {
       app.log.error(error, "Failed to fetch pool swaps");

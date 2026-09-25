@@ -1,6 +1,6 @@
 name: justhoot-near-dcl-swaps-dev
 resource_size: s
-description: Index Ref DCL swaps and JustHoot NEP-141 balance events
+description: Index raw Ref DCL swaps and JustHoot NEP-141 balance events
 
 sources:
   execution_outcomes:
@@ -40,25 +40,21 @@ transforms:
       token_out: string
       amount_in_raw: string
       amount_out_raw: string
-      amount_in: string
-      amount_out: string
-      price: string
       swapper: string
       total_fee: string
       protocol_fee: string
     script: |
       function invoke(data) {
-        const poolId = "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1|wrap.near|100";
-        const usdc = "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1";
-        const wnear = "wrap.near";
+        const launchpadSuffix = ".launchpad.hoot.near";
 
-        function formatUnits(raw, decimals) {
-          const negative = raw.startsWith("-");
-          const digits = negative ? raw.slice(1) : raw;
-          const padded = digits.padStart(decimals + 1, "0");
-          const whole = padded.slice(0, -decimals) || "0";
-          const fraction = padded.slice(-decimals).replace(/0+$/, "");
-          return (negative ? "-" : "") + whole + (fraction ? "." + fraction : "");
+        function isLaunchpadToken(tokenId) {
+          return typeof tokenId === "string" &&
+            tokenId.length > launchpadSuffix.length &&
+            tokenId.endsWith(launchpadSuffix);
+        }
+
+        function isRawAmount(value) {
+          return typeof value === "string" && /^[0-9]+$/.test(value) && value !== "0";
         }
 
         let status;
@@ -90,19 +86,18 @@ transforms:
 
           for (let dataIndex = 0; dataIndex < event.data.length; dataIndex++) {
             const swap = event.data[dataIndex];
-            if (swap.pool_id !== poolId) continue;
-            if (!swap.amount_in || !swap.amount_out) continue;
+            if (typeof swap.pool_id !== "string") continue;
+            if (typeof swap.token_in !== "string" || typeof swap.token_out !== "string") continue;
+            if (!isRawAmount(swap.amount_in) || !isRawAmount(swap.amount_out)) continue;
 
-            const inDecimals = swap.token_in === usdc ? 6 : swap.token_in === wnear ? 24 : null;
-            const outDecimals = swap.token_out === usdc ? 6 : swap.token_out === wnear ? 24 : null;
-            if (inDecimals === null || outDecimals === null) continue;
+            const poolParts = swap.pool_id.split("|");
+            if (poolParts.length !== 3) continue;
 
-            const amountIn = formatUnits(swap.amount_in, inDecimals);
-            const amountOut = formatUnits(swap.amount_out, outDecimals);
-            const usdcAmount = swap.token_in === usdc ? amountIn : amountOut;
-            const wnearAmount = swap.token_in === wnear ? amountIn : amountOut;
-            const price = Number(usdcAmount) / Number(wnearAmount);
-            if (!Number.isFinite(price) || price <= 0) continue;
+            const tokenX = poolParts[0];
+            const tokenY = poolParts[1];
+            if (!isLaunchpadToken(tokenX) && !isLaunchpadToken(tokenY)) continue;
+            if (![tokenX, tokenY].includes(swap.token_in)) continue;
+            if (![tokenX, tokenY].includes(swap.token_out)) continue;
 
             const eventIndex = logIndex * 1000 + dataIndex;
             output.push({
@@ -116,9 +111,6 @@ transforms:
               token_out: swap.token_out,
               amount_in_raw: swap.amount_in,
               amount_out_raw: swap.amount_out,
-              amount_in: amountIn,
-              amount_out: amountOut,
-              price: price.toFixed(18),
               swapper: swap.swapper || "",
               total_fee: swap.total_fee || "0",
               protocol_fee: swap.protocol_fee || "0"
@@ -142,8 +134,7 @@ transforms:
         trigger_block_height,
         trigger_block_timestamp
       FROM execution_outcomes
-      WHERE executor_id = 'launchpad.justhoot.near'
-         OR executor_id LIKE '%.launchpad.justhoot.near'
+      WHERE executor_id LIKE '%.launchpad.hoot.near'
 
   parsed_balance_events:
     type: script
