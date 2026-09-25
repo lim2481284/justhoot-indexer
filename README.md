@@ -27,9 +27,10 @@ exactly as emitted on-chain; clients must use each token's NEP-141 decimals to
 calculate human-readable amounts and price. The response also identifies the
 launchpad token, counter token, and pool fee tier.
 
-The backend collects the public Binance `NEARUSDT` price once per minute and
-stores it as an approximate NEAR/USD reference price. The latest observation is
-available at:
+The backend queries Dexscreener's public wNEAR pair endpoint once per minute,
+selects the NEAR pair with the highest reported USD liquidity, and stores its
+`priceUsd` as an approximate NEAR/USD reference price. The latest observation
+is available at:
 
 ```text
 GET /api/prices/near-usd/latest
